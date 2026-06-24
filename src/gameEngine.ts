@@ -15,6 +15,7 @@ export function startGame(room: RoomState): void {
   room.passedPlayerIds = [];
   room.playedHistory = [];
   room.winnerOrder = [];
+  room.gameStartedAt = Date.now();
 
   // player holding the 3 of spades leads, classic Tiến Lên rule
   const starterIndex = room.players.findIndex((p) =>

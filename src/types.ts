@@ -59,6 +59,7 @@ export interface RoomState {
   passedPlayerIds: string[];
   playedHistory: { playerId: string; cards: Card[] }[];
   winnerOrder: string[];
+  gameStartedAt: number | null;
 }
 
 export interface PublicPlayer {

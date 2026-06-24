@@ -9,6 +9,7 @@ import {
   toPublicRoom,
 } from "./roomManager";
 import { startGame, playCards, passTurn, computeBotTurn, GameMoveError } from "./gameEngine";
+import { saveMatchResult } from "./persistence";
 import { BotLevel, RoomState } from "./types";
 
 const RECONNECT_WINDOW_MS = 2 * 60 * 1000;
@@ -72,6 +73,10 @@ export function registerSocketHandlers(io: Server): void {
 
       broadcastRoom(io, room);
       socket.emit("room:created", { roomCode: room.roomCode });
+      if (room.status === "finished") {
+        io.to(room.roomCode).emit("game:ended", { winnerOrder: room.winnerOrder });
+        void saveMatchResult(room);
+      }
     });
 
     socket.on("room:join", (payload: { roomCode: string; name: string }) => {
@@ -142,6 +147,10 @@ export function registerSocketHandlers(io: Server): void {
       runBotsUntilHuman(io, room);
       broadcastRoom(io, room);
       io.to(room.roomCode).emit("game:started");
+      if (room.status === "finished") {
+        io.to(room.roomCode).emit("game:ended", { winnerOrder: room.winnerOrder });
+        void saveMatchResult(room);
+      }
     });
 
     socket.on("game:playCards", (cardIndices: number[]) => {
@@ -153,6 +162,7 @@ export function registerSocketHandlers(io: Server): void {
         broadcastRoom(io, room);
         if (room.status === "finished") {
           io.to(room.roomCode).emit("game:ended", { winnerOrder: room.winnerOrder });
+          void saveMatchResult(room);
         }
       } catch (err) {
         socket.emit("error:message", err instanceof GameMoveError ? err.message : "Move failed");
@@ -166,6 +176,10 @@ export function registerSocketHandlers(io: Server): void {
         passTurn(room, socket.id);
         runBotsUntilHuman(io, room);
         broadcastRoom(io, room);
+        if (room.status === "finished") {
+          io.to(room.roomCode).emit("game:ended", { winnerOrder: room.winnerOrder });
+          void saveMatchResult(room);
+        }
       } catch (err) {
         socket.emit("error:message", err instanceof GameMoveError ? err.message : "Pass failed");
       }

@@ -6,6 +6,8 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { registerSocketHandlers } from "./socketHandlers";
 import { sweepExpiredRooms } from "./roomManager";
+import { connectDb } from "./db";
+import { apiRouter } from "./routes";
 
 const PORT = Number(process.env.PORT ?? 4000);
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN ?? "http://localhost:3000";
@@ -21,6 +23,8 @@ app.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+app.use("/api", apiRouter);
+
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: CLIENT_ORIGIN, methods: ["GET", "POST"] },
@@ -30,6 +34,8 @@ registerSocketHandlers(io);
 
 setInterval(sweepExpiredRooms, 60 * 1000);
 
-httpServer.listen(PORT, () => {
-  console.log(`cards-backend listening on :${PORT}`);
+connectDb().finally(() => {
+  httpServer.listen(PORT, () => {
+    console.log(`cards-backend listening on :${PORT}`);
+  });
 });

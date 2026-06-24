@@ -48,6 +48,7 @@ export function createRoom(hostName: string, hostId: string, botLevel: BotLevel 
     passedPlayerIds: [],
     playedHistory: [],
     winnerOrder: [],
+    gameStartedAt: null,
   };
 
   rooms.set(roomCode, room);

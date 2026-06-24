@@ -2,7 +2,7 @@ import { BotLevel, Card, Combo } from "./types";
 import { identifyCombo, canBeat, isBomb } from "./game/tienlen";
 
 const BOT_NAME_POOL = [
-  "Bopha", "Sokha", "Dara", "Vanna", "Reaksmey", "Sreymom", "Pich", "Kosal",
+  "ប្រូ បុល", "ប្រូ វី", "ប្រូ ឃី", "ចែ នី", "ចែ នូ", "ចែ លី", "RG (Riven GO)", "Srey Sart",
 ];
 
 export function generateBotName(taken: Set<string>): string {
