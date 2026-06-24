@@ -131,6 +131,18 @@ export function registerSocketHandlers(io: Server): void {
       const room = getRoom(roomCode);
       if (!room) return socket.emit("error:message", "Room no longer exists");
 
+      // already a live member of this room under this exact socket (e.g. the
+      // room page mounted its listeners just after room:create/room:join
+      // fired, missing the original broadcast) — just resync, no transfer
+      const alreadyHere = room.players.find((p) => p.id === socket.id);
+      if (alreadyHere) {
+        socket.join(room.roomCode);
+        socket.data.roomCode = room.roomCode;
+        socket.data.playerName = alreadyHere.name;
+        broadcastRoom(io, room);
+        return socket.emit("room:joined", { roomCode: room.roomCode });
+      }
+
       const player = room.players.find(
         (p) => !p.connected && p.name.toLowerCase() === name.toLowerCase()
       );
