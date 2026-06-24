@@ -3,8 +3,10 @@ import { dealHands } from "./deck";
 import { isValidKatTehPlay, trickPoints, trickWinner, decideKatTehBotCard } from "./game/katteh";
 import { GameMoveError } from "./gameEngine";
 
+const CARDS_PER_PLAYER = 6;
+
 export function startKatTeh(room: RoomState): void {
-  const hands = dealHands(room.players.length);
+  const hands = dealHands(room.players.length, CARDS_PER_PLAYER);
   room.players.forEach((p, i) => {
     p.hand = hands[i];
     p.finishedAt = null;

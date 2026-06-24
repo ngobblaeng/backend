@@ -36,11 +36,41 @@ export function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-export function dealHands(playerCount: number): Card[][] {
+/**
+ * Deal `cardsPerPlayer` cards to each player from a freshly shuffled deck.
+ * Defaults to dealing the whole deck evenly (e.g. 13 each for 4 players).
+ * Any undealt remainder stays out of play.
+ */
+export function dealHands(playerCount: number, cardsPerPlayer?: number): Card[][] {
   const deck = shuffle(buildDeck());
-  const hands: Card[][] = Array.from({ length: playerCount }, () => []);
-  deck.forEach((card, i) => hands[i % playerCount].push(card));
-  hands.forEach((h) => h.sort((a, b) => a.value - b.value));
+  const perPlayer = cardsPerPlayer ?? Math.floor(deck.length / playerCount);
+  const counts = Array.from({ length: playerCount }, () => perPlayer);
+  return dealByCounts(deck, counts);
+}
+
+/**
+ * Deal uneven hands: every player gets `baseCount` cards except `extraIndex`,
+ * who gets `baseCount + extra`. Used for games where the dealt-an-extra-card
+ * player is the one who leads first.
+ */
+export function dealUnevenHands(
+  playerCount: number,
+  baseCount: number,
+  extraIndex: number,
+  extra = 1
+): Card[][] {
+  const deck = shuffle(buildDeck());
+  const counts = Array.from({ length: playerCount }, (_, i) => (i === extraIndex ? baseCount + extra : baseCount));
+  return dealByCounts(deck, counts);
+}
+
+function dealByCounts(deck: Card[], counts: number[]): Card[][] {
+  const hands: Card[][] = [];
+  let offset = 0;
+  for (const count of counts) {
+    hands.push(sortHand(deck.slice(offset, offset + count)));
+    offset += count;
+  }
   return hands;
 }
 

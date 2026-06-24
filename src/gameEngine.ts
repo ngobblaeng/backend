@@ -1,5 +1,5 @@
 import { Card, Combo, GameType, RoomState } from "./types";
-import { dealHands, sortHand } from "./deck";
+import { dealHands, dealUnevenHands, sortHand } from "./deck";
 import * as tienLen from "./game/tienlen";
 import * as sikuKhmer from "./game/sikukhmer";
 import { decideBotMove } from "./bot";
@@ -22,11 +22,6 @@ function getRuleset(gameType: GameType): ComboRuleset {
 }
 
 export function startGame(room: RoomState): void {
-  const hands = dealHands(room.players.length);
-  room.players.forEach((p, i) => {
-    p.hand = hands[i];
-    p.finishedAt = null;
-  });
   room.status = "playing";
   room.lastCombo = null;
   room.lastPlayerId = null;
@@ -36,15 +31,26 @@ export function startGame(room: RoomState): void {
   room.gameStartedAt = Date.now();
 
   if (room.gameType === "tienlen") {
+    const hands = dealHands(room.players.length, 13);
+    room.players.forEach((p, i) => {
+      p.hand = hands[i];
+      p.finishedAt = null;
+    });
     // player holding the 3 of spades leads, classic Tiến Lên rule
     const starterIndex = room.players.findIndex((p) =>
       p.hand.some((c) => c.rank === "3" && c.suit === "spades")
     );
     room.turnIndex = starterIndex >= 0 ? starterIndex : 0;
   } else {
-    // Si Ku Khmer has no mandated opening card — the host leads first
+    // Si Ku Khmer: 5 cards each, except the leader gets a 6th and opens
     const hostIndex = room.players.findIndex((p) => p.id === room.hostId);
-    room.turnIndex = hostIndex >= 0 ? hostIndex : 0;
+    const leaderIndex = hostIndex >= 0 ? hostIndex : 0;
+    const hands = dealUnevenHands(room.players.length, 5, leaderIndex, 1);
+    room.players.forEach((p, i) => {
+      p.hand = hands[i];
+      p.finishedAt = null;
+    });
+    room.turnIndex = leaderIndex;
   }
 }
 
