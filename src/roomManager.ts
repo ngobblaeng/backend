@@ -1,6 +1,7 @@
 import { customAlphabet } from "nanoid";
 import {
   BotLevel,
+  GameType,
   PlayerState,
   PublicPlayer,
   PublicRoomState,
@@ -16,7 +17,12 @@ const MAX_PLAYERS = 4;
 
 const rooms = new Map<string, RoomState>();
 
-export function createRoom(hostName: string, hostId: string, botLevel: BotLevel = "hard"): RoomState {
+export function createRoom(
+  hostName: string,
+  hostId: string,
+  botLevel: BotLevel = "hard",
+  gameType: GameType = "tienlen"
+): RoomState {
   let roomCode = generateRoomCode();
   while (rooms.has(roomCode)) roomCode = generateRoomCode();
 
@@ -34,7 +40,7 @@ export function createRoom(hostName: string, hostId: string, botLevel: BotLevel 
   const room: RoomState = {
     id: roomCode,
     roomCode,
-    gameType: "tienlen",
+    gameType,
     hostId,
     status: "lobby",
     players: [host],
@@ -49,14 +55,22 @@ export function createRoom(hostName: string, hostId: string, botLevel: BotLevel 
     playedHistory: [],
     winnerOrder: [],
     gameStartedAt: null,
+    currentTrick: [],
+    leadSuit: null,
+    points: {},
   };
 
   rooms.set(roomCode, room);
   return room;
 }
 
-export function createTrainingRoom(hostName: string, hostId: string, botLevel: BotLevel): RoomState {
-  const room = createRoom(hostName, hostId, botLevel);
+export function createTrainingRoom(
+  hostName: string,
+  hostId: string,
+  botLevel: BotLevel,
+  gameType: GameType = "tienlen"
+): RoomState {
+  const room = createRoom(hostName, hostId, botLevel, gameType);
   room.isTraining = true;
   const taken = new Set([hostName]);
   for (let i = 0; i < 3; i++) {
@@ -149,6 +163,7 @@ export function toPublicRoom(room: RoomState): PublicRoomState {
     connected: p.connected,
     cardCount: p.hand.length,
     finishedAt: p.finishedAt,
+    points: room.gameType === "katteh" ? room.points[p.id] ?? 0 : undefined,
   }));
 
   const activePlayers = room.players.filter((p) => !p.finishedAt);
@@ -170,6 +185,8 @@ export function toPublicRoom(room: RoomState): PublicRoomState {
     playedHistory: room.playedHistory,
     winnerOrder: room.winnerOrder,
     isTraining: room.isTraining,
+    currentTrick: room.currentTrick,
+    leadSuit: room.leadSuit,
   };
 }
 

@@ -1,7 +1,25 @@
-import { Card, Combo, RoomState } from "./types";
+import { Card, Combo, GameType, RoomState } from "./types";
 import { dealHands, sortHand } from "./deck";
-import { canBeat, identifyCombo } from "./game/tienlen";
+import * as tienLen from "./game/tienlen";
+import * as sikuKhmer from "./game/sikukhmer";
 import { decideBotMove } from "./bot";
+
+interface ComboRuleset {
+  identifyCombo(cards: Card[]): Combo | null;
+  canBeat(prev: Combo | null, next: Combo): boolean;
+}
+
+const RULESETS: Record<"tienlen" | "sikukhmer", ComboRuleset> = {
+  tienlen: { identifyCombo: tienLen.identifyCombo, canBeat: tienLen.canBeat },
+  sikukhmer: { identifyCombo: sikuKhmer.identifyCombo, canBeat: sikuKhmer.canBeat },
+};
+
+function getRuleset(gameType: GameType): ComboRuleset {
+  if (gameType === "katteh") {
+    throw new Error("Kat Teh uses the trick-taking engine, not the combo-shedding engine");
+  }
+  return RULESETS[gameType];
+}
 
 export function startGame(room: RoomState): void {
   const hands = dealHands(room.players.length);
@@ -17,11 +35,17 @@ export function startGame(room: RoomState): void {
   room.winnerOrder = [];
   room.gameStartedAt = Date.now();
 
-  // player holding the 3 of spades leads, classic Tiến Lên rule
-  const starterIndex = room.players.findIndex((p) =>
-    p.hand.some((c) => c.rank === "3" && c.suit === "spades")
-  );
-  room.turnIndex = starterIndex >= 0 ? starterIndex : 0;
+  if (room.gameType === "tienlen") {
+    // player holding the 3 of spades leads, classic Tiến Lên rule
+    const starterIndex = room.players.findIndex((p) =>
+      p.hand.some((c) => c.rank === "3" && c.suit === "spades")
+    );
+    room.turnIndex = starterIndex >= 0 ? starterIndex : 0;
+  } else {
+    // Si Ku Khmer has no mandated opening card — the host leads first
+    const hostIndex = room.players.findIndex((p) => p.id === room.hostId);
+    room.turnIndex = hostIndex >= 0 ? hostIndex : 0;
+  }
 }
 
 function activePlayerIndexes(room: RoomState): number[] {
@@ -50,6 +74,7 @@ function isFreshTrick(room: RoomState): boolean {
 export class GameMoveError extends Error {}
 
 export function playCards(room: RoomState, playerId: string, cardIndices: number[]): Combo {
+  const ruleset = getRuleset(room.gameType);
   const player = room.players.find((p) => p.id === playerId);
   if (!player) throw new GameMoveError("PLAYER_NOT_FOUND");
   if (room.status !== "playing") throw new GameMoveError("GAME_NOT_ACTIVE");
@@ -61,12 +86,12 @@ export function playCards(room: RoomState, playerId: string, cardIndices: number
   const cards: Card[] = cardIndices.map((i) => player.hand[i]).filter(Boolean);
   if (cards.length !== cardIndices.length) throw new GameMoveError("INVALID_CARD_INDEX");
 
-  const combo = identifyCombo(cards);
+  const combo = ruleset.identifyCombo(cards);
   if (!combo) throw new GameMoveError("INVALID_COMBO");
 
   const fresh = isFreshTrick(room);
   const prevCombo = fresh ? null : room.lastCombo;
-  if (!canBeat(prevCombo, combo)) throw new GameMoveError("MOVE_TOO_WEAK");
+  if (!ruleset.canBeat(prevCombo, combo)) throw new GameMoveError("MOVE_TOO_WEAK");
 
   const sortedIndices = [...cardIndices].sort((a, b) => b - a);
   for (const idx of sortedIndices) player.hand.splice(idx, 1);
@@ -118,13 +143,23 @@ export function passTurn(room: RoomState, playerId: string): void {
 
 /** Compute the bot's move for the current turn, or null if it should pass. */
 export function computeBotTurn(room: RoomState): { combo: Combo | null; cardIndices: number[] } {
+  const ruleset = getRuleset(room.gameType);
   const player = room.players[room.turnIndex % room.players.length];
   const fresh = isFreshTrick(room);
+  const opponents = room.players.filter((p) => p.id !== player.id && !p.finishedAt);
+  const minOpponentCardCount =
+    opponents.length > 0 ? Math.min(...opponents.map((p) => p.hand.length)) : Infinity;
+  const playedCards = room.playedHistory.flatMap((h) => h.cards);
+
   const combo = decideBotMove({
     hand: player.hand,
     lastCombo: fresh ? null : room.lastCombo,
     botLevel: room.botLevel,
     isFreshTrick: fresh,
+    minOpponentCardCount,
+    playedCards,
+    identifyCombo: ruleset.identifyCombo,
+    canBeat: ruleset.canBeat,
   });
   if (!combo) return { combo: null, cardIndices: [] };
 

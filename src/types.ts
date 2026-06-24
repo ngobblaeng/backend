@@ -41,10 +41,18 @@ export type RoomStatus = "lobby" | "playing" | "finished";
 
 export type BotLevel = "easy" | "medium" | "hard";
 
+export type GameType = "tienlen" | "katteh" | "sikukhmer";
+
+/** One played card in an active Kat Teh trick. */
+export interface TrickPlay {
+  playerId: string;
+  card: Card;
+}
+
 export interface RoomState {
   id: string;
   roomCode: string;
-  gameType: "tienlen";
+  gameType: GameType;
   hostId: string;
   status: RoomStatus;
   players: PlayerState[];
@@ -52,7 +60,7 @@ export interface RoomState {
   expiresAt: number;
   isTraining: boolean;
   botLevel: BotLevel;
-  // game state
+  // game state shared by Tiến Lên and Si Ku Khmer (combo shedding games)
   turnIndex: number;
   lastCombo: Combo | null;
   lastPlayerId: string | null;
@@ -60,6 +68,10 @@ export interface RoomState {
   playedHistory: { playerId: string; cards: Card[] }[];
   winnerOrder: string[];
   gameStartedAt: number | null;
+  // Kat Teh-only trick-taking state
+  currentTrick: TrickPlay[];
+  leadSuit: Suit | null;
+  points: Record<string, number>;
 }
 
 export interface PublicPlayer {
@@ -70,11 +82,12 @@ export interface PublicPlayer {
   connected: boolean;
   cardCount: number;
   finishedAt: number | null;
+  points?: number;
 }
 
 export interface PublicRoomState {
   roomCode: string;
-  gameType: "tienlen";
+  gameType: GameType;
   status: RoomStatus;
   hostId: string;
   players: PublicPlayer[];
@@ -85,4 +98,6 @@ export interface PublicRoomState {
   playedHistory: { playerId: string; cards: Card[] }[];
   winnerOrder: string[];
   isTraining: boolean;
+  currentTrick: TrickPlay[];
+  leadSuit: Suit | null;
 }

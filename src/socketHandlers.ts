@@ -9,11 +9,13 @@ import {
   toPublicRoom,
 } from "./roomManager";
 import { startGame, playCards, passTurn, computeBotTurn, GameMoveError } from "./gameEngine";
+import { startKatTeh, playKatTehCard, computeKatTehBotTurn } from "./gameEngineKatTeh";
 import { saveMatchResult } from "./persistence";
-import { BotLevel, RoomState } from "./types";
+import { BotLevel, GameType, RoomState } from "./types";
 
 const RECONNECT_WINDOW_MS = 2 * 60 * 1000;
 const disconnectTimers = new Map<string, NodeJS.Timeout>();
+const VALID_GAME_TYPES: GameType[] = ["tienlen", "katteh", "sikukhmer"];
 
 function sanitizeName(name: string): string {
   return name.trim().slice(0, 20).replace(/[<>]/g, "");
@@ -21,6 +23,18 @@ function sanitizeName(name: string): string {
 
 function isValidRoomCode(code: string): boolean {
   return /^[A-Z0-9]{4,8}$/i.test(code);
+}
+
+function sanitizeGameType(value: unknown): GameType {
+  return VALID_GAME_TYPES.includes(value as GameType) ? (value as GameType) : "tienlen";
+}
+
+function startGameForRoom(room: RoomState): void {
+  if (room.gameType === "katteh") {
+    startKatTeh(room);
+  } else {
+    startGame(room);
+  }
 }
 
 function broadcastRoom(io: Server, room: RoomState): void {
@@ -34,15 +48,20 @@ function broadcastRoom(io: Server, room: RoomState): void {
 
 function runBotsUntilHuman(io: Server, room: RoomState): void {
   let guard = 0;
-  while (room.status === "playing" && guard < 50) {
+  while (room.status === "playing" && guard < 100) {
     const current = room.players[room.turnIndex % room.players.length];
     if (!current.isBot) break;
-    const { cardIndices } = computeBotTurn(room);
     try {
-      if (cardIndices.length > 0) {
-        playCards(room, current.id, cardIndices);
+      if (room.gameType === "katteh") {
+        const { cardIndex } = computeKatTehBotTurn(room);
+        playKatTehCard(room, current.id, cardIndex);
       } else {
-        passTurn(room, current.id);
+        const { cardIndices } = computeBotTurn(room);
+        if (cardIndices.length > 0) {
+          playCards(room, current.id, cardIndices);
+        } else {
+          passTurn(room, current.id);
+        }
       }
     } catch {
       break;
@@ -51,33 +70,41 @@ function runBotsUntilHuman(io: Server, room: RoomState): void {
   }
 }
 
+function emitGameEndIfFinished(io: Server, room: RoomState): void {
+  if (room.status === "finished") {
+    io.to(room.roomCode).emit("game:ended", { winnerOrder: room.winnerOrder });
+    void saveMatchResult(room);
+  }
+}
+
 export function registerSocketHandlers(io: Server): void {
   io.on("connection", (socket: Socket) => {
-    socket.on("room:create", (payload: { name: string; isTraining?: boolean; botLevel?: BotLevel }) => {
-      const name = sanitizeName(payload?.name ?? "");
-      if (!name) return socket.emit("error:message", "Name is required");
+    socket.on(
+      "room:create",
+      (payload: { name: string; isTraining?: boolean; botLevel?: BotLevel; gameType?: GameType }) => {
+        const name = sanitizeName(payload?.name ?? "");
+        if (!name) return socket.emit("error:message", "Name is required");
 
-      const botLevel = payload?.botLevel ?? "hard";
-      const room = payload?.isTraining
-        ? createTrainingRoom(name, socket.id, botLevel)
-        : createRoom(name, socket.id, botLevel);
+        const botLevel = payload?.botLevel ?? "hard";
+        const gameType = sanitizeGameType(payload?.gameType);
+        const room = payload?.isTraining
+          ? createTrainingRoom(name, socket.id, botLevel, gameType)
+          : createRoom(name, socket.id, botLevel, gameType);
 
-      socket.join(room.roomCode);
-      socket.data.roomCode = room.roomCode;
-      socket.data.playerName = name;
+        socket.join(room.roomCode);
+        socket.data.roomCode = room.roomCode;
+        socket.data.playerName = name;
 
-      if (room.isTraining) {
-        startGame(room);
-        runBotsUntilHuman(io, room);
+        if (room.isTraining) {
+          startGameForRoom(room);
+          runBotsUntilHuman(io, room);
+        }
+
+        broadcastRoom(io, room);
+        socket.emit("room:created", { roomCode: room.roomCode });
+        emitGameEndIfFinished(io, room);
       }
-
-      broadcastRoom(io, room);
-      socket.emit("room:created", { roomCode: room.roomCode });
-      if (room.status === "finished") {
-        io.to(room.roomCode).emit("game:ended", { winnerOrder: room.winnerOrder });
-        void saveMatchResult(room);
-      }
-    });
+    );
 
     socket.on("room:join", (payload: { roomCode: string; name: string }) => {
       const roomCode = (payload?.roomCode ?? "").toUpperCase().trim();
@@ -122,6 +149,13 @@ export function registerSocketHandlers(io: Server): void {
       if (room.lastPlayerId === oldId) room.lastPlayerId = socket.id;
       room.passedPlayerIds = room.passedPlayerIds.map((id) => (id === oldId ? socket.id : id));
       room.winnerOrder = room.winnerOrder.map((id) => (id === oldId ? socket.id : id));
+      if (room.points[oldId] !== undefined) {
+        room.points[socket.id] = room.points[oldId];
+        delete room.points[oldId];
+      }
+      room.currentTrick = room.currentTrick.map((t) =>
+        t.playerId === oldId ? { ...t, playerId: socket.id } : t
+      );
 
       socket.join(room.roomCode);
       socket.data.roomCode = room.roomCode;
@@ -143,27 +177,28 @@ export function registerSocketHandlers(io: Server): void {
       if (!room || room.hostId !== socket.id) return socket.emit("error:message", "Only host can start");
       if (room.players.length < 2) return socket.emit("error:message", "Need at least 2 players");
 
-      startGame(room);
+      startGameForRoom(room);
       runBotsUntilHuman(io, room);
       broadcastRoom(io, room);
       io.to(room.roomCode).emit("game:started");
-      if (room.status === "finished") {
-        io.to(room.roomCode).emit("game:ended", { winnerOrder: room.winnerOrder });
-        void saveMatchResult(room);
-      }
+      emitGameEndIfFinished(io, room);
     });
 
     socket.on("game:playCards", (cardIndices: number[]) => {
       const room = getRoom(socket.data.roomCode ?? "");
       if (!room) return;
       try {
-        playCards(room, socket.id, cardIndices);
+        if (room.gameType === "katteh") {
+          if (!Array.isArray(cardIndices) || cardIndices.length !== 1) {
+            throw new GameMoveError("KAT_TEH_SINGLE_CARD_ONLY");
+          }
+          playKatTehCard(room, socket.id, cardIndices[0]);
+        } else {
+          playCards(room, socket.id, cardIndices);
+        }
         runBotsUntilHuman(io, room);
         broadcastRoom(io, room);
-        if (room.status === "finished") {
-          io.to(room.roomCode).emit("game:ended", { winnerOrder: room.winnerOrder });
-          void saveMatchResult(room);
-        }
+        emitGameEndIfFinished(io, room);
       } catch (err) {
         socket.emit("error:message", err instanceof GameMoveError ? err.message : "Move failed");
       }
@@ -172,14 +207,14 @@ export function registerSocketHandlers(io: Server): void {
     socket.on("game:pass", () => {
       const room = getRoom(socket.data.roomCode ?? "");
       if (!room) return;
+      if (room.gameType === "katteh") {
+        return socket.emit("error:message", "Kat Teh has no passing — you must follow suit or play a card");
+      }
       try {
         passTurn(room, socket.id);
         runBotsUntilHuman(io, room);
         broadcastRoom(io, room);
-        if (room.status === "finished") {
-          io.to(room.roomCode).emit("game:ended", { winnerOrder: room.winnerOrder });
-          void saveMatchResult(room);
-        }
+        emitGameEndIfFinished(io, room);
       } catch (err) {
         socket.emit("error:message", err instanceof GameMoveError ? err.message : "Pass failed");
       }
