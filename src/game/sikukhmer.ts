@@ -11,9 +11,11 @@ import { Card, Rank } from "../types";
  * Remove any same-rank pairs already sitting inside a single hand (this
  * happens right after the deal, and can also happen if a player draws/holds
  * two of a kind without anyone claiming them). Returns the reduced hand and
- * how many pairs were found, in case the caller wants to credit a score.
+ * the actual pairs removed, so the caller can both credit a score and log
+ * them to the discard history — otherwise a hand dealt with built-in pairs
+ * just looks like it was dealt short, with no explanation visible anywhere.
  */
-export function extractPairsFromHand(hand: Card[]): { hand: Card[]; pairsFound: number } {
+export function extractPairsFromHand(hand: Card[]): { hand: Card[]; pairs: [Card, Card][] } {
   const byRank = new Map<Rank, Card[]>();
   for (const card of hand) {
     const list = byRank.get(card.rank) ?? [];
@@ -22,13 +24,15 @@ export function extractPairsFromHand(hand: Card[]): { hand: Card[]; pairsFound: 
   }
 
   const kept: Card[] = [];
-  let pairsFound = 0;
+  const pairs: [Card, Card][] = [];
   for (const cards of byRank.values()) {
-    const pairs = Math.floor(cards.length / 2);
-    pairsFound += pairs;
+    const pairCount = Math.floor(cards.length / 2);
+    for (let i = 0; i < pairCount; i++) {
+      pairs.push([cards[i * 2], cards[i * 2 + 1]]);
+    }
     if (cards.length % 2 === 1) kept.push(cards[cards.length - 1]);
   }
-  return { hand: kept, pairsFound };
+  return { hand: kept, pairs };
 }
 
 /** Index of the first card in `hand` matching `rank`, or -1 if none. */

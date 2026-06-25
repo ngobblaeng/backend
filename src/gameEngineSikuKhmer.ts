@@ -14,17 +14,22 @@ export function startSikuKhmer(room: RoomState): void {
   const { hands, remainder } = dealUnevenHandsWithRemainder(room.players.length, 5, leaderIndex, 1);
 
   room.points = {};
+  room.playedHistory = [];
   room.players.forEach((p, i) => {
-    const { hand, pairsFound } = extractPairsFromHand(hands[i]);
+    const { hand, pairs } = extractPairsFromHand(hands[i]);
     p.hand = hand;
     p.finishedAt = null;
-    room.points[p.id] = pairsFound;
+    room.points[p.id] = pairs.length;
+    // log the auto-discarded starting pairs — otherwise a hand dealt with
+    // built-in pairs just looks like it was shorted, with no explanation
+    for (const [a, b] of pairs) {
+      room.playedHistory.push({ playerId: p.id, cards: [a, b] });
+    }
   });
 
   room.sikuTable = [];
   room.sikuCenterPile = remainder;
   room.status = "playing";
-  room.playedHistory = [];
   room.winnerOrder = [];
   room.gameStartedAt = Date.now();
   room.turnIndex = leaderIndex;
