@@ -58,6 +58,8 @@ export function createRoom(
     currentTrick: [],
     leadSuit: null,
     points: {},
+    finalRound: false,
+    finalPlacements: {},
     sikuTable: [],
     sikuCenterPile: [],
   };
@@ -192,6 +194,13 @@ export function toPublicRoom(room: RoomState): PublicRoomState {
     leadSuit: room.leadSuit,
     sikuTable: room.sikuTable,
     sikuCenterRemaining: room.sikuCenterPile.length,
+    finalRound: room.finalRound,
+    finalPlacements: Object.fromEntries(
+      Object.entries(room.finalPlacements).map(([id, placement]) => [
+        id,
+        { faceUp: placement.faceUp, faceDown: room.status === "finished" ? placement.faceDown : null },
+      ])
+    ),
   };
 }
 

@@ -71,8 +71,11 @@ export interface RoomState {
   // Kat Teh-only trick-taking state
   currentTrick: TrickPlay[];
   leadSuit: Suit | null;
-  // shared score map: Kat Teh trick points, or Si Ku Khmer pairs collected
+  // shared score map: Kat Teh tricks won, or Si Ku Khmer pairs collected
   points: Record<string, number>;
+  // Kat Teh-only final 2-card showdown
+  finalRound: boolean;
+  finalPlacements: Record<string, { faceUp: Card; faceDown: Card }>;
   // Si Ku Khmer-only pair-matching state
   sikuTable: Card[];
   sikuCenterPile: Card[];
@@ -106,4 +109,6 @@ export interface PublicRoomState {
   leadSuit: Suit | null;
   sikuTable: Card[];
   sikuCenterRemaining: number;
+  finalRound: boolean;
+  finalPlacements: Record<string, { faceUp: Card; faceDown: Card | null }>;
 }

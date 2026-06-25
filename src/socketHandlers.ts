@@ -9,7 +9,13 @@ import {
   toPublicRoom,
 } from "./roomManager";
 import { startGame, playCards, passTurn, computeBotTurn, GameMoveError } from "./gameEngine";
-import { startKatTeh, playKatTehCard, computeKatTehBotTurn } from "./gameEngineKatTeh";
+import {
+  startKatTeh,
+  playKatTehCard,
+  placeKatTehFinalCard,
+  computeKatTehBotTurn,
+  computeKatTehFinalBotPlacement,
+} from "./gameEngineKatTeh";
 import { startSikuKhmer, playSikuCard, computeSikuBotTurn } from "./gameEngineSikuKhmer";
 import { saveMatchResult } from "./persistence";
 import { BotLevel, GameType, RoomState } from "./types";
@@ -51,7 +57,7 @@ function broadcastRoom(io: Server, room: RoomState): void {
 
 function runBotsUntilHuman(io: Server, room: RoomState): void {
   let guard = 0;
-  while (room.status === "playing" && guard < 100) {
+  while (room.status === "playing" && !room.finalRound && guard < 100) {
     const current = room.players[room.turnIndex % room.players.length];
     if (!current.isBot) break;
     try {
@@ -73,6 +79,20 @@ function runBotsUntilHuman(io: Server, room: RoomState): void {
       break;
     }
     guard++;
+  }
+
+  // Kat Teh's final 2-card showdown isn't turn-based — every player places
+  // independently, so have bots place as soon as the round starts.
+  if (room.gameType === "katteh" && room.status === "playing" && room.finalRound) {
+    for (const p of room.players) {
+      if (!p.isBot || room.finalPlacements[p.id]) continue;
+      try {
+        const faceUpIndex = computeKatTehFinalBotPlacement(room, p.id);
+        placeKatTehFinalCard(room, p.id, faceUpIndex);
+      } catch {
+        break;
+      }
+    }
   }
 }
 
@@ -174,6 +194,10 @@ export function registerSocketHandlers(io: Server): void {
       room.currentTrick = room.currentTrick.map((t) =>
         t.playerId === oldId ? { ...t, playerId: socket.id } : t
       );
+      if (room.finalPlacements[oldId]) {
+        room.finalPlacements[socket.id] = room.finalPlacements[oldId];
+        delete room.finalPlacements[oldId];
+      }
 
       socket.join(room.roomCode);
       socket.data.roomCode = room.roomCode;
@@ -224,6 +248,19 @@ export function registerSocketHandlers(io: Server): void {
         emitGameEndIfFinished(io, room);
       } catch (err) {
         socket.emit("error:message", err instanceof GameMoveError ? err.message : "Move failed");
+      }
+    });
+
+    socket.on("game:placeFinalCards", (payload: { faceUpIndex: number }) => {
+      const room = getRoom(socket.data.roomCode ?? "");
+      if (!room) return;
+      try {
+        placeKatTehFinalCard(room, socket.id, payload?.faceUpIndex);
+        runBotsUntilHuman(io, room);
+        broadcastRoom(io, room);
+        emitGameEndIfFinished(io, room);
+      } catch (err) {
+        socket.emit("error:message", err instanceof GameMoveError ? err.message : "Placement failed");
       }
     });
 
