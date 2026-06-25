@@ -24,6 +24,19 @@ const RECONNECT_WINDOW_MS = 2 * 60 * 1000;
 const disconnectTimers = new Map<string, NodeJS.Timeout>();
 const VALID_GAME_TYPES: GameType[] = ["tienlen", "katteh", "sikukhmer"];
 
+// Live voice chat is peer-to-peer (WebRTC) — the server only relays signaling
+// messages between players in the same room and tracks who currently has
+// their mic connection open. No audio ever passes through or is stored here.
+const voiceParticipants = new Map<string, Set<string>>();
+
+function leaveVoice(io: Server, roomCode: string, socketId: string): void {
+  const set = voiceParticipants.get(roomCode);
+  if (!set || !set.has(socketId)) return;
+  set.delete(socketId);
+  if (set.size === 0) voiceParticipants.delete(roomCode);
+  io.to(roomCode).emit("voice:peer-left", { peerId: socketId });
+}
+
 function sanitizeName(name: string): string {
   return name.trim().slice(0, 20).replace(/[<>]/g, "");
 }
@@ -295,6 +308,31 @@ export function registerSocketHandlers(io: Server): void {
       });
     });
 
+    socket.on("voice:join", () => {
+      const roomCode = socket.data.roomCode;
+      if (!roomCode || !getRoom(roomCode)) return;
+      const set = voiceParticipants.get(roomCode) ?? new Set<string>();
+      const existingPeers = [...set];
+      set.add(socket.id);
+      voiceParticipants.set(roomCode, set);
+      socket.emit("voice:peers", { peers: existingPeers });
+      socket.to(roomCode).emit("voice:peer-joined", { peerId: socket.id });
+    });
+
+    socket.on("voice:leave", () => {
+      const roomCode = socket.data.roomCode;
+      if (!roomCode) return;
+      leaveVoice(io, roomCode, socket.id);
+    });
+
+    socket.on("voice:signal", (payload: { to: string; data: unknown }) => {
+      const roomCode = socket.data.roomCode;
+      if (!roomCode || !payload?.to) return;
+      const set = voiceParticipants.get(roomCode);
+      if (!set || !set.has(socket.id) || !set.has(payload.to)) return;
+      io.to(payload.to).emit("voice:signal", { from: socket.id, data: payload.data });
+    });
+
     socket.on("room:leave", () => {
       handleLeave(io, socket);
     });
@@ -302,6 +340,7 @@ export function registerSocketHandlers(io: Server): void {
     socket.on("disconnect", () => {
       const roomCode = socket.data.roomCode;
       if (!roomCode) return;
+      leaveVoice(io, roomCode, socket.id);
       const room = getRoom(roomCode);
       if (!room) return;
       const player = room.players.find((p) => p.id === socket.id);
@@ -327,6 +366,7 @@ export function registerSocketHandlers(io: Server): void {
 function handleLeave(io: Server, socket: Socket): void {
   const roomCode = socket.data.roomCode;
   if (!roomCode) return;
+  leaveVoice(io, roomCode, socket.id);
   const timer = disconnectTimers.get(socket.id);
   if (timer) clearTimeout(timer);
   const room = removePlayer(roomCode, socket.id);
