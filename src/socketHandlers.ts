@@ -10,6 +10,7 @@ import {
 } from "./roomManager";
 import { startGame, playCards, passTurn, computeBotTurn, GameMoveError } from "./gameEngine";
 import { startKatTeh, playKatTehCard, computeKatTehBotTurn } from "./gameEngineKatTeh";
+import { startSikuKhmer, playSikuCard, computeSikuBotTurn } from "./gameEngineSikuKhmer";
 import { saveMatchResult } from "./persistence";
 import { BotLevel, GameType, RoomState } from "./types";
 
@@ -32,6 +33,8 @@ function sanitizeGameType(value: unknown): GameType {
 function startGameForRoom(room: RoomState): void {
   if (room.gameType === "katteh") {
     startKatTeh(room);
+  } else if (room.gameType === "sikukhmer") {
+    startSikuKhmer(room);
   } else {
     startGame(room);
   }
@@ -55,6 +58,9 @@ function runBotsUntilHuman(io: Server, room: RoomState): void {
       if (room.gameType === "katteh") {
         const { cardIndex } = computeKatTehBotTurn(room);
         playKatTehCard(room, current.id, cardIndex);
+      } else if (room.gameType === "sikukhmer") {
+        const { cardIndex } = computeSikuBotTurn(room);
+        playSikuCard(room, current.id, cardIndex);
       } else {
         const { cardIndices } = computeBotTurn(room);
         if (cardIndices.length > 0) {
@@ -205,6 +211,11 @@ export function registerSocketHandlers(io: Server): void {
             throw new GameMoveError("KAT_TEH_SINGLE_CARD_ONLY");
           }
           playKatTehCard(room, socket.id, cardIndices[0]);
+        } else if (room.gameType === "sikukhmer") {
+          if (!Array.isArray(cardIndices) || cardIndices.length !== 1) {
+            throw new GameMoveError("SIKU_KHMER_SINGLE_CARD_ONLY");
+          }
+          playSikuCard(room, socket.id, cardIndices[0]);
         } else {
           playCards(room, socket.id, cardIndices);
         }
@@ -221,6 +232,9 @@ export function registerSocketHandlers(io: Server): void {
       if (!room) return;
       if (room.gameType === "katteh") {
         return socket.emit("error:message", "Kat Teh has no passing — you must follow suit or play a card");
+      }
+      if (room.gameType === "sikukhmer") {
+        return socket.emit("error:message", "Si Ku Khmer has no passing — you must drop a card every turn");
       }
       try {
         passTurn(room, socket.id);

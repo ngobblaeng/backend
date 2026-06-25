@@ -50,18 +50,21 @@ export function dealHands(playerCount: number, cardsPerPlayer?: number): Card[][
 
 /**
  * Deal uneven hands: every player gets `baseCount` cards except `extraIndex`,
- * who gets `baseCount + extra`. Used for games where the dealt-an-extra-card
- * player is the one who leads first.
+ * who gets `baseCount + extra`, and also return the undealt remainder of the
+ * deck (the center pile) instead of discarding it. Used by Si Ku Khmer, where
+ * leftover cards are opened one at a time as the round progresses.
  */
-export function dealUnevenHands(
+export function dealUnevenHandsWithRemainder(
   playerCount: number,
   baseCount: number,
   extraIndex: number,
   extra = 1
-): Card[][] {
+): { hands: Card[][]; remainder: Card[] } {
   const deck = shuffle(buildDeck());
   const counts = Array.from({ length: playerCount }, (_, i) => (i === extraIndex ? baseCount + extra : baseCount));
-  return dealByCounts(deck, counts);
+  const hands = dealByCounts(deck, counts);
+  const dealt = counts.reduce((a, b) => a + b, 0);
+  return { hands, remainder: deck.slice(dealt) };
 }
 
 function dealByCounts(deck: Card[], counts: number[]): Card[][] {

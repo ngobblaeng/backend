@@ -58,6 +58,8 @@ export function createRoom(
     currentTrick: [],
     leadSuit: null,
     points: {},
+    sikuTable: [],
+    sikuCenterPile: [],
   };
 
   rooms.set(roomCode, room);
@@ -163,7 +165,8 @@ export function toPublicRoom(room: RoomState): PublicRoomState {
     connected: p.connected,
     cardCount: p.hand.length,
     finishedAt: p.finishedAt,
-    points: room.gameType === "katteh" ? room.points[p.id] ?? 0 : undefined,
+    points:
+      room.gameType === "katteh" || room.gameType === "sikukhmer" ? room.points[p.id] ?? 0 : undefined,
   }));
 
   const activePlayers = room.players.filter((p) => !p.finishedAt);
@@ -187,6 +190,8 @@ export function toPublicRoom(room: RoomState): PublicRoomState {
     isTraining: room.isTraining,
     currentTrick: room.currentTrick,
     leadSuit: room.leadSuit,
+    sikuTable: room.sikuTable,
+    sikuCenterRemaining: room.sikuCenterPile.length,
   };
 }
 

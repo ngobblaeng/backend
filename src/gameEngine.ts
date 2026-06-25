@@ -1,7 +1,6 @@
-import { Card, Combo, GameType, RoomState } from "./types";
-import { dealHands, dealUnevenHands, sortHand } from "./deck";
+import { Card, Combo, RoomState } from "./types";
+import { dealHands, sortHand } from "./deck";
 import * as tienLen from "./game/tienlen";
-import * as sikuKhmer from "./game/sikukhmer";
 import { decideBotMove } from "./bot";
 
 interface ComboRuleset {
@@ -9,18 +8,11 @@ interface ComboRuleset {
   canBeat(prev: Combo | null, next: Combo): boolean;
 }
 
-const RULESETS: Record<"tienlen" | "sikukhmer", ComboRuleset> = {
-  tienlen: { identifyCombo: tienLen.identifyCombo, canBeat: tienLen.canBeat },
-  sikukhmer: { identifyCombo: sikuKhmer.identifyCombo, canBeat: sikuKhmer.canBeat },
-};
-
-function getRuleset(gameType: GameType): ComboRuleset {
-  if (gameType === "katteh") {
-    throw new Error("Kat Teh uses the trick-taking engine, not the combo-shedding engine");
-  }
-  return RULESETS[gameType];
+function getRuleset(): ComboRuleset {
+  return { identifyCombo: tienLen.identifyCombo, canBeat: tienLen.canBeat };
 }
 
+/** Tiến Lên only — Kat Teh and Si Ku Khmer use their own dedicated engines. */
 export function startGame(room: RoomState): void {
   room.status = "playing";
   room.lastCombo = null;
@@ -30,28 +22,16 @@ export function startGame(room: RoomState): void {
   room.winnerOrder = [];
   room.gameStartedAt = Date.now();
 
-  if (room.gameType === "tienlen") {
-    const hands = dealHands(room.players.length, 13);
-    room.players.forEach((p, i) => {
-      p.hand = hands[i];
-      p.finishedAt = null;
-    });
-    // player holding the 3 of spades leads, classic Tiến Lên rule
-    const starterIndex = room.players.findIndex((p) =>
-      p.hand.some((c) => c.rank === "3" && c.suit === "spades")
-    );
-    room.turnIndex = starterIndex >= 0 ? starterIndex : 0;
-  } else {
-    // Si Ku Khmer: 5 cards each, except the leader gets a 6th and opens
-    const hostIndex = room.players.findIndex((p) => p.id === room.hostId);
-    const leaderIndex = hostIndex >= 0 ? hostIndex : 0;
-    const hands = dealUnevenHands(room.players.length, 5, leaderIndex, 1);
-    room.players.forEach((p, i) => {
-      p.hand = hands[i];
-      p.finishedAt = null;
-    });
-    room.turnIndex = leaderIndex;
-  }
+  const hands = dealHands(room.players.length, 13);
+  room.players.forEach((p, i) => {
+    p.hand = hands[i];
+    p.finishedAt = null;
+  });
+  // player holding the 3 of spades leads, classic Tiến Lên rule
+  const starterIndex = room.players.findIndex((p) =>
+    p.hand.some((c) => c.rank === "3" && c.suit === "spades")
+  );
+  room.turnIndex = starterIndex >= 0 ? starterIndex : 0;
 }
 
 function activePlayerIndexes(room: RoomState): number[] {
@@ -80,7 +60,7 @@ function isFreshTrick(room: RoomState): boolean {
 export class GameMoveError extends Error {}
 
 export function playCards(room: RoomState, playerId: string, cardIndices: number[]): Combo {
-  const ruleset = getRuleset(room.gameType);
+  const ruleset = getRuleset();
   const player = room.players.find((p) => p.id === playerId);
   if (!player) throw new GameMoveError("PLAYER_NOT_FOUND");
   if (room.status !== "playing") throw new GameMoveError("GAME_NOT_ACTIVE");
@@ -149,7 +129,7 @@ export function passTurn(room: RoomState, playerId: string): void {
 
 /** Compute the bot's move for the current turn, or null if it should pass. */
 export function computeBotTurn(room: RoomState): { combo: Combo | null; cardIndices: number[] } {
-  const ruleset = getRuleset(room.gameType);
+  const ruleset = getRuleset();
   const player = room.players[room.turnIndex % room.players.length];
   const fresh = isFreshTrick(room);
   const opponents = room.players.filter((p) => p.id !== player.id && !p.finishedAt);
