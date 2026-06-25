@@ -12,17 +12,32 @@ export function kattehRankValue(rank: Rank): number {
 
 const PREMIUM_RANKS = new Set(["A", "K", "Q"]);
 
-/** A player must follow the lead suit if they hold any card of it. */
-export function isValidKatTehPlay(hand: Card[], card: Card, leadSuit: Suit | null): boolean {
-  if (!leadSuit) return true;
-  const hasLeadSuit = hand.some((c) => c.suit === leadSuit);
-  if (!hasLeadSuit) return true;
-  return card.suit === leadSuit;
+/** The strongest non-folded card of the lead suit currently in the trick. */
+function bestOfSuit(trick: TrickPlay[], suit: Suit): Card {
+  const ofSuit = trick.filter((t) => !t.folded && t.card.suit === suit).map((t) => t.card);
+  return ofSuit.reduce((best, c) => (kattehRankValue(c.rank) > kattehRankValue(best.rank) ? c : best));
 }
 
-/** Highest card of the lead suit wins the trick; off-suit cards never win. */
+/**
+ * Can this card beat the current trick? Only a card of the lead suit with a
+ * higher rank than the best non-folded card so far counts as a beat — a
+ * player unable to beat must fold instead of just under-playing a card.
+ */
+export function canBeatCurrent(card: Card, leadSuit: Suit, currentTrick: TrickPlay[]): boolean {
+  if (card.suit !== leadSuit) return false;
+  if (currentTrick.length === 0) return true;
+  const best = bestOfSuit(currentTrick, leadSuit);
+  return kattehRankValue(card.rank) > kattehRankValue(best.rank);
+}
+
+/** Does this hand contain any card that could beat the current trick? */
+export function hasBeatingCard(hand: Card[], leadSuit: Suit, currentTrick: TrickPlay[]): boolean {
+  return hand.some((c) => canBeatCurrent(c, leadSuit, currentTrick));
+}
+
+/** Highest non-folded card of the lead suit wins the trick. */
 export function trickWinner(trick: TrickPlay[], leadSuit: Suit): string {
-  const ofLeadSuit = trick.filter((t) => t.card.suit === leadSuit);
+  const ofLeadSuit = trick.filter((t) => !t.folded && t.card.suit === leadSuit);
   const winner = ofLeadSuit.reduce((best, t) =>
     kattehRankValue(t.card.rank) > kattehRankValue(best.card.rank) ? t : best
   );
@@ -33,36 +48,30 @@ function lowestCard(cards: Card[]): Card {
   return [...cards].sort((a, b) => kattehRankValue(a.rank) - kattehRankValue(b.rank))[0];
 }
 
-function bestOfSuit(trick: TrickPlay[], suit: Suit): Card {
-  const ofSuit = trick.filter((t) => t.card.suit === suit).map((t) => t.card);
-  return ofSuit.reduce((best, c) => (kattehRankValue(c.rank) > kattehRankValue(best.rank) ? c : best));
-}
-
 /**
- * Choose which card a Kat Teh bot should play. Priority (winning the trick
- * to lead next) matters more than any single card's value here, so the bot
- * tries to win cheaply when it can, but holds onto A/K/Q as long as
- * possible — they're the cards that matter most in the final 2-card round.
+ * Decide a bot's move for a normal trick. Leading: play a low card, holding
+ * onto A/K/Q for the final round. Following: beat cheaply if possible (to
+ * gain priority) — preferring to keep premium cards in reserve — otherwise
+ * fold with the safest card we can spare.
  */
-export function decideKatTehBotCard(hand: Card[], leadSuit: Suit | null, currentTrick: TrickPlay[]): Card {
+export function decideKatTehMove(
+  hand: Card[],
+  leadSuit: Suit | null,
+  currentTrick: TrickPlay[]
+): { action: "lead" | "beat" | "fold"; card: Card } {
   const nonPremium = hand.filter((c) => !PREMIUM_RANKS.has(c.rank));
 
-  if (!leadSuit) {
-    return lowestCard(nonPremium.length > 0 ? nonPremium : hand);
+  if (!leadSuit || currentTrick.length === 0) {
+    return { action: "lead", card: lowestCard(nonPremium.length > 0 ? nonPremium : hand) };
   }
 
-  const ofSuit = hand.filter((c) => c.suit === leadSuit);
-  if (ofSuit.length === 0) {
-    // can't follow suit — fold with the safest card we can spare
-    return lowestCard(nonPremium.length > 0 ? nonPremium : hand);
+  const beatingCards = hand.filter((c) => canBeatCurrent(c, leadSuit, currentTrick));
+  if (beatingCards.length > 0) {
+    const nonPremiumBeats = beatingCards.filter((c) => !PREMIUM_RANKS.has(c.rank));
+    return { action: "beat", card: lowestCard(nonPremiumBeats.length > 0 ? nonPremiumBeats : beatingCards) };
   }
 
-  const bestInTrick = bestOfSuit(currentTrick, leadSuit);
-  const winningCards = ofSuit.filter((c) => kattehRankValue(c.rank) > kattehRankValue(bestInTrick.rank));
-  if (winningCards.length > 0) return lowestCard(winningCards);
-
-  // can't win this trick — play the smallest of-suit card to lose as cheaply as possible
-  return lowestCard(ofSuit);
+  return { action: "fold", card: lowestCard(nonPremium.length > 0 ? nonPremium : hand) };
 }
 
 /**

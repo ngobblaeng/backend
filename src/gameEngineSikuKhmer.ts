@@ -28,58 +28,99 @@ export function startSikuKhmer(room: RoomState): void {
   room.winnerOrder = [];
   room.gameStartedAt = Date.now();
   room.turnIndex = leaderIndex;
+
+  // rare edge case: a player's dealt hand can be entirely pairs (e.g. all 6
+  // of the leader's cards forming 3 pairs), emptying it before anyone takes
+  // a turn — that's an instant win, not a hand to "play" from
+  checkForWinner(room);
 }
 
 function nextSeat(room: RoomState, index: number): number {
   return (index + 1) % room.players.length;
 }
 
-function finishIfEmpty(room: RoomState, player: RoomState["players"][number]): boolean {
-  if (player.hand.length !== 0) return false;
-  player.finishedAt = Date.now();
+function checkForWinner(room: RoomState): boolean {
+  const winner = room.players.find((p) => p.hand.length === 0 && !p.finishedAt);
+  if (!winner) return false;
+  winner.finishedAt = Date.now();
   room.status = "finished";
   // winner first, then the rest ranked by pairs collected
   room.winnerOrder = [
-    player.id,
-    ...room.players.filter((p) => p.id !== player.id).sort((a, b) => (room.points[b.id] ?? 0) - (room.points[a.id] ?? 0)).map((p) => p.id),
+    winner.id,
+    ...room.players
+      .filter((p) => p.id !== winner.id)
+      .sort((a, b) => (room.points[b.id] ?? 0) - (room.points[a.id] ?? 0))
+      .map((p) => p.id),
   ];
   return true;
 }
 
-/**
- * Open one card from the center pile in front of the next player, who gets
- * first priority to claim it (against their own hand, then the table).
- * If unclaimed, it joins the table as a face-up single.
- */
-function openCenterCard(room: RoomState, frontOfIndex: number): void {
-  const card = room.sikuCenterPile.shift();
-  if (!card) return;
-  const frontPlayer = room.players[frontOfIndex];
-
-  const handMatch = findMatchIndex(frontPlayer.hand, card.rank);
-  if (handMatch >= 0) {
-    frontPlayer.hand.splice(handMatch, 1);
-    room.points[frontPlayer.id] = (room.points[frontPlayer.id] ?? 0) + 1;
-    room.playedHistory.push({ playerId: frontPlayer.id, cards: [card] });
-    return;
+function seatOrderFrom(room: RoomState, startIndex: number, count: number): number[] {
+  const order: number[] = [];
+  let seat = startIndex;
+  for (let i = 0; i < count; i++) {
+    order.push(seat);
+    seat = nextSeat(room, seat);
   }
+  return order;
+}
 
+/**
+ * Try to pair `card` against the table first (credited to `tableMatchSeat`
+ * — whoever "owns" this resolution), then against players' hands in
+ * `handScanOrder`. Records the completed pair (both cards) in the discard
+ * history, credited to whoever claimed it. Returns whether it was claimed.
+ */
+function tryPairCard(
+  room: RoomState,
+  card: Card,
+  tableMatchSeat: number,
+  handScanOrder: number[]
+): boolean {
   const tableMatch = findTableMatchIndex(room.sikuTable, card.rank);
   if (tableMatch >= 0) {
-    room.sikuTable.splice(tableMatch, 1);
-    room.points[frontPlayer.id] = (room.points[frontPlayer.id] ?? 0) + 1;
-    room.playedHistory.push({ playerId: frontPlayer.id, cards: [card] });
-    return;
+    const [partner] = room.sikuTable.splice(tableMatch, 1);
+    const claimerId = room.players[tableMatchSeat].id;
+    room.points[claimerId] = (room.points[claimerId] ?? 0) + 1;
+    room.playedHistory.push({ playerId: claimerId, cards: [card, partner] });
+    return true;
   }
 
-  room.sikuTable.push(card);
+  for (const seat of handScanOrder) {
+    const candidate = room.players[seat];
+    const matchIdx = findMatchIndex(candidate.hand, card.rank);
+    if (matchIdx >= 0) {
+      const [partner] = candidate.hand.splice(matchIdx, 1);
+      room.points[candidate.id] = (room.points[candidate.id] ?? 0) + 1;
+      room.playedHistory.push({ playerId: candidate.id, cards: [card, partner] });
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Nobody could use the dropped card directly — draw one from the center
+ * pile and reveal it. The player seated right after the dropper gets first
+ * priority to use it; if they can't, priority cascades clockwise through
+ * everyone else. If nobody can use it either, it joins the table.
+ */
+function drawAndResolve(room: RoomState, frontIndex: number): void {
+  const card = room.sikuCenterPile.shift();
+  if (!card) return;
+  const order = seatOrderFrom(room, frontIndex, room.players.length);
+  if (!tryPairCard(room, card, frontIndex, order)) {
+    room.sikuTable.push(card);
+  }
 }
 
 export function playSikuCard(room: RoomState, playerId: string, cardIndex: number): Card {
   const player = room.players.find((p) => p.id === playerId);
   if (!player) throw new GameMoveError("PLAYER_NOT_FOUND");
   if (room.status !== "playing") throw new GameMoveError("GAME_NOT_ACTIVE");
-  if (room.players[room.turnIndex % room.players.length].id !== playerId) {
+  const dropperIndex = room.turnIndex % room.players.length;
+  if (room.players[dropperIndex].id !== playerId) {
     throw new GameMoveError("NOT_YOUR_TURN");
   }
   const card = player.hand[cardIndex];
@@ -87,44 +128,23 @@ export function playSikuCard(room: RoomState, playerId: string, cardIndex: numbe
 
   player.hand.splice(cardIndex, 1);
 
-  // A card that matches one already sitting on the table pairs immediately,
-  // credited to the player who dropped it.
-  const tableMatch = findTableMatchIndex(room.sikuTable, card.rank);
-  if (tableMatch >= 0) {
-    room.sikuTable.splice(tableMatch, 1);
-    room.points[playerId] = (room.points[playerId] ?? 0) + 1;
-    room.playedHistory.push({ playerId, cards: [card] });
-  } else {
-    // Otherwise, whoever holds a matching card may claim it — priority goes
-    // to whoever is seated closest going clockwise from the dropper.
-    let claimedBy: string | null = null;
-    let seat = nextSeat(room, room.turnIndex);
-    for (let step = 0; step < room.players.length - 1; step++) {
-      const candidate = room.players[seat];
-      const matchIdx = findMatchIndex(candidate.hand, card.rank);
-      if (matchIdx >= 0) {
-        candidate.hand.splice(matchIdx, 1);
-        room.points[candidate.id] = (room.points[candidate.id] ?? 0) + 1;
-        room.playedHistory.push({ playerId: candidate.id, cards: [card] });
-        claimedBy = candidate.id;
-        break;
-      }
-      seat = nextSeat(room, seat);
-    }
-    if (!claimedBy) {
-      room.sikuTable.push(card);
-    }
+  // a table match is credited to the dropper; otherwise anyone holding a
+  // match gets priority going clockwise from the dropper. Only if nobody
+  // can use the dropped card at all does the deck get drawn.
+  const handScanOrder = seatOrderFrom(room, dropperIndex, room.players.length).filter(
+    (seat) => seat !== dropperIndex
+  );
+  const claimed = tryPairCard(room, card, dropperIndex, handScanOrder);
+  if (!claimed) {
+    // the dropped card itself stays on the table, unclaimed — drawing from
+    // the deck is a separate, additional action that follows it
+    room.sikuTable.push(card);
+    drawAndResolve(room, nextSeat(room, dropperIndex));
   }
 
-  if (finishIfEmpty(room, player)) return card;
+  if (checkForWinner(room)) return card;
 
-  const nextIndex = nextSeat(room, room.turnIndex);
-  openCenterCard(room, nextIndex);
-
-  const frontPlayer = room.players[nextIndex];
-  if (finishIfEmpty(room, frontPlayer)) return card;
-
-  room.turnIndex = nextIndex;
+  room.turnIndex = nextSeat(room, dropperIndex);
   return card;
 }
 

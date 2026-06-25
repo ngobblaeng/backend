@@ -12,6 +12,7 @@ import { startGame, playCards, passTurn, computeBotTurn, GameMoveError } from ".
 import {
   startKatTeh,
   playKatTehCard,
+  foldKatTehCard,
   placeKatTehFinalCard,
   computeKatTehBotTurn,
   computeKatTehFinalBotPlacement,
@@ -75,8 +76,12 @@ function runBotsUntilHuman(io: Server, room: RoomState): void {
     if (!current.isBot) break;
     try {
       if (room.gameType === "katteh") {
-        const { cardIndex } = computeKatTehBotTurn(room);
-        playKatTehCard(room, current.id, cardIndex);
+        const { action, cardIndex } = computeKatTehBotTurn(room);
+        if (action === "fold") {
+          foldKatTehCard(room, current.id, cardIndex);
+        } else {
+          playKatTehCard(room, current.id, cardIndex);
+        }
       } else if (room.gameType === "sikukhmer") {
         const { cardIndex } = computeSikuBotTurn(room);
         playSikuCard(room, current.id, cardIndex);
@@ -261,6 +266,22 @@ export function registerSocketHandlers(io: Server): void {
         emitGameEndIfFinished(io, room);
       } catch (err) {
         socket.emit("error:message", err instanceof GameMoveError ? err.message : "Move failed");
+      }
+    });
+
+    socket.on("game:foldKatTehCard", (cardIndices: number[]) => {
+      const room = getRoom(socket.data.roomCode ?? "");
+      if (!room || room.gameType !== "katteh") return;
+      try {
+        if (!Array.isArray(cardIndices) || cardIndices.length !== 1) {
+          throw new GameMoveError("KAT_TEH_SINGLE_CARD_ONLY");
+        }
+        foldKatTehCard(room, socket.id, cardIndices[0]);
+        runBotsUntilHuman(io, room);
+        broadcastRoom(io, room);
+        emitGameEndIfFinished(io, room);
+      } catch (err) {
+        socket.emit("error:message", err instanceof GameMoveError ? err.message : "Fold failed");
       }
     });
 

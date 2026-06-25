@@ -43,10 +43,20 @@ export type BotLevel = "easy" | "medium" | "hard";
 
 export type GameType = "tienlen" | "katteh" | "sikukhmer";
 
-/** One played card in an active Kat Teh trick. */
+/** One played card in an active Kat Teh trick. A folded play discards a
+ * card face-down — it never contributes to the trick and is never revealed
+ * to anyone, including for card-counting purposes. */
 export interface TrickPlay {
   playerId: string;
   card: Card;
+  folded: boolean;
+}
+
+/** Public projection of a trick play — folded cards are hidden entirely. */
+export interface PublicTrickPlay {
+  playerId: string;
+  card: Card | null;
+  folded: boolean;
 }
 
 export interface RoomState {
@@ -105,7 +115,7 @@ export interface PublicRoomState {
   playedHistory: { playerId: string; cards: Card[] }[];
   winnerOrder: string[];
   isTraining: boolean;
-  currentTrick: TrickPlay[];
+  currentTrick: PublicTrickPlay[];
   leadSuit: Suit | null;
   sikuTable: Card[];
   sikuCenterRemaining: number;

@@ -1,9 +1,9 @@
 import { Card, RoomState } from "./types";
 import { dealHands } from "./deck";
 import {
-  isValidKatTehPlay,
+  canBeatCurrent,
   trickWinner,
-  decideKatTehBotCard,
+  decideKatTehMove,
   decideKatTehFinalFaceUp,
   kattehRankValue,
 } from "./game/katteh";
@@ -88,6 +88,30 @@ function finalizeKatTehShowdown(room: RoomState): void {
   ];
 }
 
+function resolveTrickIfComplete(room: RoomState): void {
+  if (room.currentTrick.length !== room.players.length) {
+    room.turnIndex = nextSeat(room, room.turnIndex);
+    return;
+  }
+
+  const winnerId = trickWinner(room.currentTrick, room.leadSuit!);
+  room.points[winnerId] = (room.points[winnerId] ?? 0) + 1;
+  // folded cards are never revealed — they're excluded from history so
+  // nobody (including bots) can use them for card-counting
+  const revealedCards = room.currentTrick.filter((t) => !t.folded).map((t) => t.card);
+  room.playedHistory.push({ playerId: winnerId, cards: revealedCards });
+
+  room.currentTrick = [];
+  room.leadSuit = null;
+  room.turnIndex = room.players.findIndex((p) => p.id === winnerId);
+
+  if (room.players.every((p) => p.hand.length === 2)) {
+    room.finalRound = true;
+  } else if (room.players.every((p) => p.hand.length === 0)) {
+    finalizeKatTeh(room);
+  }
+}
+
 export function playKatTehCard(room: RoomState, playerId: string, cardIndex: number): Card {
   const player = room.players.find((p) => p.id === playerId);
   if (!player) throw new GameMoveError("PLAYER_NOT_FOUND");
@@ -99,32 +123,40 @@ export function playKatTehCard(room: RoomState, playerId: string, cardIndex: num
 
   const card = player.hand[cardIndex];
   if (!card) throw new GameMoveError("INVALID_CARD_INDEX");
-  if (!isValidKatTehPlay(player.hand, card, room.leadSuit)) {
-    throw new GameMoveError("MUST_FOLLOW_SUIT");
+
+  if (room.currentTrick.length === 0) {
+    player.hand.splice(cardIndex, 1);
+    room.leadSuit = card.suit;
+    room.currentTrick.push({ playerId, card, folded: false });
+  } else {
+    if (!canBeatCurrent(card, room.leadSuit!, room.currentTrick)) {
+      throw new GameMoveError("MUST_BEAT_OR_FOLD");
+    }
+    player.hand.splice(cardIndex, 1);
+    room.currentTrick.push({ playerId, card, folded: false });
   }
+
+  resolveTrickIfComplete(room);
+  return card;
+}
+
+export function foldKatTehCard(room: RoomState, playerId: string, cardIndex: number): Card {
+  const player = room.players.find((p) => p.id === playerId);
+  if (!player) throw new GameMoveError("PLAYER_NOT_FOUND");
+  if (room.status !== "playing") throw new GameMoveError("GAME_NOT_ACTIVE");
+  if (room.finalRound) throw new GameMoveError("FINAL_ROUND_USE_PLACEMENT");
+  if (room.players[room.turnIndex % room.players.length].id !== playerId) {
+    throw new GameMoveError("NOT_YOUR_TURN");
+  }
+  if (room.currentTrick.length === 0) throw new GameMoveError("CANNOT_FOLD_WHEN_LEADING");
+
+  const card = player.hand[cardIndex];
+  if (!card) throw new GameMoveError("INVALID_CARD_INDEX");
 
   player.hand.splice(cardIndex, 1);
-  if (room.currentTrick.length === 0) room.leadSuit = card.suit;
-  room.currentTrick.push({ playerId, card });
+  room.currentTrick.push({ playerId, card, folded: true });
 
-  if (room.currentTrick.length === room.players.length) {
-    const winnerId = trickWinner(room.currentTrick, room.leadSuit!);
-    room.points[winnerId] = (room.points[winnerId] ?? 0) + 1;
-    room.playedHistory.push({ playerId: winnerId, cards: room.currentTrick.map((t) => t.card) });
-
-    room.currentTrick = [];
-    room.leadSuit = null;
-    room.turnIndex = room.players.findIndex((p) => p.id === winnerId);
-
-    if (room.players.every((p) => p.hand.length === 2)) {
-      room.finalRound = true;
-    } else if (room.players.every((p) => p.hand.length === 0)) {
-      finalizeKatTeh(room);
-    }
-  } else {
-    room.turnIndex = nextSeat(room, room.turnIndex);
-  }
-
+  resolveTrickIfComplete(room);
   return card;
 }
 
@@ -147,12 +179,14 @@ export function placeKatTehFinalCard(room: RoomState, playerId: string, faceUpIn
   }
 }
 
-/** Compute the bot's card index for the current turn (normal trick play). */
-export function computeKatTehBotTurn(room: RoomState): { card: Card; cardIndex: number } {
+/** Compute the bot's move for the current turn (normal trick play). */
+export function computeKatTehBotTurn(
+  room: RoomState
+): { action: "lead" | "beat" | "fold"; cardIndex: number } {
   const player = room.players[room.turnIndex % room.players.length];
-  const card = decideKatTehBotCard(player.hand, room.leadSuit, room.currentTrick);
+  const { action, card } = decideKatTehMove(player.hand, room.leadSuit, room.currentTrick);
   const cardIndex = player.hand.findIndex((c) => c.rank === card.rank && c.suit === card.suit);
-  return { card, cardIndex };
+  return { action, cardIndex };
 }
 
 /** Compute which of a bot's two remaining cards to play face up in the final round. */

@@ -190,7 +190,11 @@ export function toPublicRoom(room: RoomState): PublicRoomState {
     playedHistory: room.playedHistory,
     winnerOrder: room.winnerOrder,
     isTraining: room.isTraining,
-    currentTrick: room.currentTrick,
+    currentTrick: room.currentTrick.map((t) => ({
+      playerId: t.playerId,
+      card: t.folded ? null : t.card,
+      folded: t.folded,
+    })),
     leadSuit: room.leadSuit,
     sikuTable: room.sikuTable,
     sikuCenterRemaining: room.sikuCenterPile.length,
